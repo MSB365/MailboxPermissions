@@ -33,5 +33,6 @@ shared.mailbox@company.com,admin@company.com,FALSE,TRUE
 finance@company.com,john.doe@company.com,TRUE,TRUE
 finance@company.com,finance.manager@company.com,TRUE,TRUE
 
-### Documentation
+
+## Documentation
 The documentation of this script can be found at the Blogpost <https://www.msb365.blog/?p=5907>
