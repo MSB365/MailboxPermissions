@@ -4,7 +4,7 @@
 
 This PowerShell script automates the management of "Send As" and "Full Access" permissions for Exchange mailboxes. It reads desired permissions from a CSV file, applies them, and removes any existing permissions not specified in the CSV. The script includes a graphical user interface (GUI) file picker for easy selection of your CSV input.
 
-User PowerShell 7 to run this script.
+*Use PowerShell 7 to run this script.*
 
 ## Documentation
 The documentation of this script can be found at the Blogpost <https://www.msb365.blog/?p=5907>
