@@ -263,6 +263,19 @@ param(
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
+# Global variables for reporting
+$global:reportData = @{
+    StartTime = Get-Date
+    EndTime = $null
+    CsvFile = ""
+    TotalMailboxes = 0
+    ProcessedMailboxes = 0
+    SuccessfulChanges = 0
+    Errors = @()
+    MailboxResults = @()
+    WhatIfMode = $false
+}
+
 # Function to show file picker dialog
 function Show-FilePickerDialog {
     $fileDialog = New-Object System.Windows.Forms.OpenFileDialog
@@ -331,6 +344,421 @@ function Show-ErrorDialog {
     )
 }
 
+# Function to add mailbox result to report data
+function Add-MailboxResult {
+    param(
+        [string]$MailboxIdentity,
+        [string]$MailboxDisplayName,
+        [array]$PermissionChanges,
+        [array]$Errors,
+        [string]$Status
+    )
+    
+    $mailboxResult = @{
+        MailboxIdentity = $MailboxIdentity
+        MailboxDisplayName = $MailboxDisplayName
+        PermissionChanges = $PermissionChanges
+        Errors = $Errors
+        Status = $Status
+        ProcessedAt = Get-Date
+    }
+    
+    $global:reportData.MailboxResults += $mailboxResult
+}
+
+# Function to add permission change to tracking
+function Add-PermissionChange {
+    param(
+        [string]$Action,
+        [string]$PermissionType,
+        [string]$User,
+        [string]$Status,
+        [string]$ErrorMessage = ""
+    )
+    
+    return @{
+        Action = $Action
+        PermissionType = $PermissionType
+        User = $User
+        Status = $Status
+        ErrorMessage = $ErrorMessage
+        Timestamp = Get-Date
+    }
+}
+
+# Function to generate HTML report
+function Generate-HTMLReport {
+    param(
+        [string]$OutputPath
+    )
+    
+    $global:reportData.EndTime = Get-Date
+    $duration = $global:reportData.EndTime - $global:reportData.StartTime
+    
+    $html = @"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exchange Online Permissions Report</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 2.5em;
+            font-weight: 300;
+        }
+        .header p {
+            margin: 10px 0 0 0;
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            padding: 30px;
+            background-color: #f8f9fa;
+        }
+        .summary-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-left: 4px solid #667eea;
+        }
+        .summary-card h3 {
+            margin: 0 0 10px 0;
+            color: #667eea;
+            font-size: 2em;
+        }
+        .summary-card p {
+            margin: 0;
+            color: #666;
+            font-weight: 500;
+        }
+        .content {
+            padding: 30px;
+        }
+        .mailbox-section {
+            margin-bottom: 30px;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .mailbox-header {
+            background-color: #f8f9fa;
+            padding: 15px 20px;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .mailbox-title {
+            font-weight: 600;
+            font-size: 1.1em;
+            color: #333;
+        }
+        .status-badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+        .status-success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status-error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status-warning {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        .permissions-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 0;
+        }
+        .permissions-table th {
+            background-color: #f8f9fa;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #495057;
+            border-bottom: 2px solid #dee2e6;
+        }
+        .permissions-table td {
+            padding: 12px;
+            border-bottom: 1px solid #dee2e6;
+            vertical-align: top;
+        }
+        .permissions-table tr:hover {
+            background-color: #f8f9fa;
+        }
+        .action-added {
+            color: #28a745;
+            font-weight: 500;
+        }
+        .action-removed {
+            color: #dc3545;
+            font-weight: 500;
+        }
+        .action-unchanged {
+            color: #6c757d;
+            font-style: italic;
+        }
+        .permission-type {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            font-weight: 500;
+        }
+        .permission-fullaccess {
+            background-color: #e3f2fd;
+            color: #1565c0;
+        }
+        .permission-sendas {
+            background-color: #f3e5f5;
+            color: #7b1fa2;
+        }
+        .error-section {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 20px;
+        }
+        .error-title {
+            color: #721c24;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+        .error-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .error-list li {
+            padding: 5px 0;
+            color: #721c24;
+        }
+        .whatif-notice {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            color: #856404;
+            font-weight: 500;
+            text-align: center;
+        }
+        .footer {
+            background-color: #f8f9fa;
+            padding: 20px;
+            text-align: center;
+            color: #666;
+            border-top: 1px solid #e0e0e0;
+        }
+        .no-changes {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Exchange Online Permissions Report</h1>
+            <p>Generated on $($global:reportData.EndTime.ToString('dddd, MMMM dd, yyyy at HH:mm:ss'))</p>
+        </div>
+        
+        $(if ($global:reportData.WhatIfMode) {
+            '<div class="whatif-notice">
+                <strong>PREVIEW MODE:</strong> This report shows what would have been changed. No actual modifications were made.
+            </div>'
+        })
+        
+        <div class="summary">
+            <div class="summary-card">
+                <h3>$($global:reportData.TotalMailboxes)</h3>
+                <p>Total Mailboxes</p>
+            </div>
+            <div class="summary-card">
+                <h3>$($global:reportData.ProcessedMailboxes)</h3>
+                <p>Processed Successfully</p>
+            </div>
+            <div class="summary-card">
+                <h3>$($global:reportData.SuccessfulChanges)</h3>
+                <p>Permission Changes</p>
+            </div>
+            <div class="summary-card">
+                <h3>$($global:reportData.Errors.Count)</h3>
+                <p>Errors Encountered</p>
+            </div>
+        </div>
+        
+        <div class="content">
+            <h2>Execution Details</h2>
+            <table class="permissions-table">
+                <tr>
+                    <td><strong>CSV File:</strong></td>
+                    <td>$(Split-Path $global:reportData.CsvFile -Leaf)</td>
+                </tr>
+                <tr>
+                    <td><strong>Start Time:</strong></td>
+                    <td>$($global:reportData.StartTime.ToString('yyyy-MM-dd HH:mm:ss'))</td>
+                </tr>
+                <tr>
+                    <td><strong>End Time:</strong></td>
+                    <td>$($global:reportData.EndTime.ToString('yyyy-MM-dd HH:mm:ss'))</td>
+                </tr>
+                <tr>
+                    <td><strong>Duration:</strong></td>
+                    <td>$($duration.ToString('mm\:ss'))</td>
+                </tr>
+                <tr>
+                    <td><strong>Mode:</strong></td>
+                    <td>$(if ($global:reportData.WhatIfMode) { "Preview Mode (WhatIf)" } else { "Live Mode" })</td>
+                </tr>
+            </table>
+            
+            <h2>Mailbox Processing Results</h2>
+            
+            $(if ($global:reportData.MailboxResults.Count -eq 0) {
+                '<div class="no-changes">No mailboxes were processed.</div>'
+            } else {
+                $global:reportData.MailboxResults | ForEach-Object {
+                    $mailbox = $_
+                    $statusClass = switch ($mailbox.Status) {
+                        "Success" { "status-success" }
+                        "Error" { "status-error" }
+                        "Warning" { "status-warning" }
+                        default { "status-warning" }
+                    }
+                    
+                    "<div class='mailbox-section'>
+                        <div class='mailbox-header'>
+                            <div class='mailbox-title'>$($mailbox.MailboxDisplayName) ($($mailbox.MailboxIdentity))</div>
+                            <div class='status-badge $statusClass'>$($mailbox.Status)</div>
+                        </div>"
+                    
+                    if ($mailbox.PermissionChanges.Count -gt 0) {
+                        "<table class='permissions-table'>
+                            <thead>
+                                <tr>
+                                    <th>Action</th>
+                                    <th>Permission Type</th>
+                                    <th>User</th>
+                                    <th>Status</th>
+                                    <th>Details</th>
+                                </tr>
+                            </thead>
+                            <tbody>"
+                        
+                        $mailbox.PermissionChanges | ForEach-Object {
+                            $change = $_
+                            $actionClass = switch ($change.Action) {
+                                "Added" { "action-added" }
+                                "Removed" { "action-removed" }
+                                default { "action-unchanged" }
+                            }
+                            $permissionClass = switch ($change.PermissionType) {
+                                "Full Access" { "permission-fullaccess" }
+                                "Send As" { "permission-sendas" }
+                                default { "" }
+                            }
+                            
+                            "<tr>
+                                <td class='$actionClass'>$($change.Action)</td>
+                                <td><span class='permission-type $permissionClass'>$($change.PermissionType)</span></td>
+                                <td>$($change.User)</td>
+                                <td class='$(if ($change.Status -eq "Success") { "action-added" } else { "action-removed" })'>$($change.Status)</td>
+                                <td>$(if ($change.ErrorMessage) { $change.ErrorMessage } else { "Completed successfully" })</td>
+                            </tr>"
+                        }
+                        
+                        "</tbody></table>"
+                    } else {
+                        "<div class='no-changes'>No permission changes were needed for this mailbox.</div>"
+                    }
+                    
+                    if ($mailbox.Errors.Count -gt 0) {
+                        "<div class='error-section'>
+                            <div class='error-title'>Errors for this mailbox:</div>
+                            <ul class='error-list'>"
+                        $mailbox.Errors | ForEach-Object {
+                            "<li>$_</li>"
+                        }
+                        "</ul></div>"
+                    }
+                    
+                    "</div>"
+                }
+            })
+            
+            $(if ($global:reportData.Errors.Count -gt 0) {
+                "<h2>Global Errors</h2>
+                <div class='error-section'>
+                    <div class='error-title'>The following errors occurred during processing:</div>
+                    <ul class='error-list'>"
+                $global:reportData.Errors | ForEach-Object {
+                    "<li>$_</li>"
+                }
+                "</ul></div>"
+            })
+        </div>
+        
+        <div class="footer">
+            <p>Report generated by Exchange Online Permissions Manager</p>
+            <p>PowerShell Script executed by $($env:USERNAME) on $($env:COMPUTERNAME)</p>
+        </div>
+    </div>
+</body>
+</html>
+"@
+
+    try {
+        $html | Out-File -FilePath $OutputPath -Encoding UTF8
+        return $true
+    }
+    catch {
+        Write-Error "Failed to generate HTML report: $($_.Exception.Message)"
+        return $false
+    }
+}
+
 # Show welcome message
 $welcomeMessage = @"
 Exchange Online Mailbox Permissions Manager
@@ -339,6 +767,7 @@ This script will:
 • Set Send As and Full Access permissions based on your CSV file
 • Remove permissions not defined in the CSV file
 • Preserve system permissions
+• Generate a detailed HTML report
 
 Click OK to select your CSV file.
 "@
@@ -348,6 +777,8 @@ Show-InfoDialog -Message $welcomeMessage -Title "Welcome"
 # Show file picker dialog
 Write-Host "Opening file picker dialog..." -ForegroundColor Cyan
 $CsvPath = Show-FilePickerDialog
+$global:reportData.CsvFile = $CsvPath
+$global:reportData.WhatIfMode = $WhatIf
 
 Write-Host "Selected file: $CsvPath" -ForegroundColor Green
 
@@ -431,6 +862,7 @@ if ($missingHeaders.Count -gt 0) {
 # Show summary and confirmation
 $mailboxGroups = $csvData | Group-Object -Property MailboxIdentity
 $totalPermissions = $csvData.Count
+$global:reportData.TotalMailboxes = $mailboxGroups.Count
 
 $summaryMessage = @"
 CSV File Summary:
@@ -449,26 +881,26 @@ if (-not (Show-ConfirmationDialog -Message $summaryMessage -Title "Confirm Proce
 
 Write-Host "`nProcessing $($mailboxGroups.Count) mailboxes..." -ForegroundColor Cyan
 
-$processedMailboxes = 0
-$successfulChanges = 0
-$errors = @()
-
 foreach ($mailboxGroup in $mailboxGroups) {
     $mailboxIdentity = $mailboxGroup.Name
     $permissions = $mailboxGroup.Group
+    $mailboxErrors = @()
+    $permissionChanges = @()
     
     Write-Host "`n--- Processing mailbox: $mailboxIdentity ---" -ForegroundColor Yellow
-    $processedMailboxes++
     
     # Verify mailbox exists
     try {
         $mailbox = Get-Mailbox -Identity $mailboxIdentity -ErrorAction Stop
         Write-Host "✓ Mailbox found: $($mailbox.DisplayName)" -ForegroundColor Green
+        $mailboxDisplayName = $mailbox.DisplayName
     }
     catch {
         $errorMsg = "Mailbox not found: $mailboxIdentity"
         Write-Warning $errorMsg
-        $errors += $errorMsg
+        $global:reportData.Errors += $errorMsg
+        $mailboxErrors += $errorMsg
+        Add-MailboxResult -MailboxIdentity $mailboxIdentity -MailboxDisplayName $mailboxIdentity -PermissionChanges @() -Errors $mailboxErrors -Status "Error"
         continue
     }
     
@@ -483,7 +915,9 @@ foreach ($mailboxGroup in $mailboxGroups) {
     catch {
         $errorMsg = "Failed to get current permissions for $mailboxIdentity : $($_.Exception.Message)"
         Write-Warning $errorMsg
-        $errors += $errorMsg
+        $global:reportData.Errors += $errorMsg
+        $mailboxErrors += $errorMsg
+        Add-MailboxResult -MailboxIdentity $mailboxIdentity -MailboxDisplayName $mailboxDisplayName -PermissionChanges @() -Errors $mailboxErrors -Status "Error"
         continue
     }
     
@@ -511,16 +945,19 @@ foreach ($mailboxGroup in $mailboxGroups) {
                 try {
                     Add-MailboxPermission -Identity $mailboxIdentity -User $user -AccessRights FullAccess -InheritanceType All -Confirm:$false
                     Write-Host "  ✓ Successfully added Full Access for $user" -ForegroundColor Green
-                    $successfulChanges++
+                    $global:reportData.SuccessfulChanges++
+                    $permissionChanges += Add-PermissionChange -Action "Added" -PermissionType "Full Access" -User $user -Status "Success"
                 }
                 catch {
                     $errorMsg = "Failed to add Full Access for $user : $($_.Exception.Message)"
                     Write-Warning "  $errorMsg"
-                    $errors += $errorMsg
+                    $mailboxErrors += $errorMsg
+                    $permissionChanges += Add-PermissionChange -Action "Added" -PermissionType "Full Access" -User $user -Status "Failed" -ErrorMessage $_.Exception.Message
                 }
             }
             else {
                 Write-Host "  [WHATIF] Would add Full Access for: $user" -ForegroundColor Magenta
+                $permissionChanges += Add-PermissionChange -Action "Added" -PermissionType "Full Access" -User $user -Status "Preview"
             }
         }
         else {
@@ -536,16 +973,19 @@ foreach ($mailboxGroup in $mailboxGroups) {
                 try {
                     Remove-MailboxPermission -Identity $mailboxIdentity -User $currentPerm.User -AccessRights FullAccess -Confirm:$false
                     Write-Host "  ✓ Successfully removed Full Access for $($currentPerm.User)" -ForegroundColor Green
-                    $successfulChanges++
+                    $global:reportData.SuccessfulChanges++
+                    $permissionChanges += Add-PermissionChange -Action "Removed" -PermissionType "Full Access" -User $currentPerm.User -Status "Success"
                 }
                 catch {
                     $errorMsg = "Failed to remove Full Access for $($currentPerm.User) : $($_.Exception.Message)"
                     Write-Warning "  $errorMsg"
-                    $errors += $errorMsg
+                    $mailboxErrors += $errorMsg
+                    $permissionChanges += Add-PermissionChange -Action "Removed" -PermissionType "Full Access" -User $currentPerm.User -Status "Failed" -ErrorMessage $_.Exception.Message
                 }
             }
             else {
                 Write-Host "  [WHATIF] Would remove Full Access for: $($currentPerm.User)" -ForegroundColor Magenta
+                $permissionChanges += Add-PermissionChange -Action "Removed" -PermissionType "Full Access" -User $currentPerm.User -Status "Preview"
             }
         }
     }
@@ -561,16 +1001,19 @@ foreach ($mailboxGroup in $mailboxGroups) {
                 try {
                     Add-RecipientPermission -Identity $mailboxIdentity -Trustee $user -AccessRights SendAs -Confirm:$false
                     Write-Host "  ✓ Successfully added Send As for $user" -ForegroundColor Green
-                    $successfulChanges++
+                    $global:reportData.SuccessfulChanges++
+                    $permissionChanges += Add-PermissionChange -Action "Added" -PermissionType "Send As" -User $user -Status "Success"
                 }
                 catch {
                     $errorMsg = "Failed to add Send As for $user : $($_.Exception.Message)"
                     Write-Warning "  $errorMsg"
-                    $errors += $errorMsg
+                    $mailboxErrors += $errorMsg
+                    $permissionChanges += Add-PermissionChange -Action "Added" -PermissionType "Send As" -User $user -Status "Failed" -ErrorMessage $_.Exception.Message
                 }
             }
             else {
                 Write-Host "  [WHATIF] Would add Send As for: $user" -ForegroundColor Magenta
+                $permissionChanges += Add-PermissionChange -Action "Added" -PermissionType "Send As" -User $user -Status "Preview"
             }
         }
         else {
@@ -586,36 +1029,76 @@ foreach ($mailboxGroup in $mailboxGroups) {
                 try {
                     Remove-RecipientPermission -Identity $currentPerm.Identity -Trustee $currentPerm.Trustee -AccessRights SendAs -Confirm:$false
                     Write-Host "  ✓ Successfully removed Send As for $($currentPerm.Trustee)" -ForegroundColor Green
-                    $successfulChanges++
+                    $global:reportData.SuccessfulChanges++
+                    $permissionChanges += Add-PermissionChange -Action "Removed" -PermissionType "Send As" -User $currentPerm.Trustee -Status "Success"
                 }
                 catch {
                     $errorMsg = "Failed to remove Send As for $($currentPerm.Trustee) : $($_.Exception.Message)"
                     Write-Warning "  $errorMsg"
-                    $errors += $errorMsg
+                    $mailboxErrors += $errorMsg
+                    $permissionChanges += Add-PermissionChange -Action "Removed" -PermissionType "Send As" -User $currentPerm.Trustee -Status "Failed" -ErrorMessage $_.Exception.Message
                 }
             }
             else {
                 Write-Host "  [WHATIF] Would remove Send As for: $($currentPerm.Trustee)" -ForegroundColor Magenta
+                $permissionChanges += Add-PermissionChange -Action "Removed" -PermissionType "Send As" -User $currentPerm.Trustee -Status "Preview"
             }
         }
     }
+    
+    # Determine mailbox status
+    $mailboxStatus = if ($mailboxErrors.Count -gt 0) { "Error" } 
+                    elseif ($permissionChanges.Count -eq 0) { "No Changes" }
+                    else { "Success" }
+    
+    # Add mailbox result to report
+    Add-MailboxResult -MailboxIdentity $mailboxIdentity -MailboxDisplayName $mailboxDisplayName -PermissionChanges $permissionChanges -Errors $mailboxErrors -Status $mailboxStatus
+    $global:reportData.ProcessedMailboxes++
 }
 
 Write-Host "`n✓ Script execution completed!" -ForegroundColor Green
+
+# Generate HTML report
+$csvDirectory = Split-Path -Path $CsvPath -Parent
+$csvFileName = [System.IO.Path]::GetFileNameWithoutExtension($CsvPath)
+$reportFileName = "$csvFileName-Permissions-Report-$(Get-Date -Format 'yyyyMMdd-HHmmss').html"
+$reportPath = Join-Path -Path $csvDirectory -ChildPath $reportFileName
+
+Write-Host "`nGenerating HTML report..." -ForegroundColor Cyan
+
+if (Generate-HTMLReport -OutputPath $reportPath) {
+    Write-Host "✓ HTML report generated successfully: $reportPath" -ForegroundColor Green
+    
+    # Ask user if they want to open the report
+    $openReportMsg = "HTML report has been generated successfully!`n`nLocation: $reportPath`n`nWould you like to open the report now?"
+    if (Show-ConfirmationDialog -Message $openReportMsg -Title "Report Generated") {
+        try {
+            Start-Process $reportPath
+        }
+        catch {
+            Write-Warning "Could not open report automatically. Please open it manually from: $reportPath"
+        }
+    }
+}
+else {
+    Write-Error "Failed to generate HTML report"
+}
 
 # Show completion summary
 $completionMessage = @"
 Processing Complete!
 
 Summary:
-• Processed mailboxes: $processedMailboxes
-• Successful changes: $successfulChanges
-• Errors encountered: $($errors.Count)
+• Processed mailboxes: $($global:reportData.ProcessedMailboxes)
+• Successful changes: $($global:reportData.SuccessfulChanges)
+• Errors encountered: $($global:reportData.Errors.Count)
 $(if ($WhatIf) { "`nNote: This was a preview run. No actual changes were made." } else { "" })
-$(if ($errors.Count -gt 0) { "`nErrors:`n" + ($errors -join "`n") } else { "" })
+
+HTML Report: $reportFileName
+Location: $(Split-Path -Path $CsvPath -Parent)
 "@
 
-if ($errors.Count -gt 0) {
+if ($global:reportData.Errors.Count -gt 0) {
     Show-ErrorDialog -Message $completionMessage -Title "Processing Complete (With Errors)"
 }
 else {
