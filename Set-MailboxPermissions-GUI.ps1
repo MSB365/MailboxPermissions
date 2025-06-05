@@ -16,11 +16,11 @@ Find us on:
 ==============================================================================
 
 .SYNOPSIS
-    Manages Exchange Online mailbox permissions based on CSV file input with GUI file picker
+    Manages Exchange Online mailbox permissions based on CSV file input with GUI file picker and HTML reporting
 .DESCRIPTION
     This script sets "Send As" and "Full Access" permissions for mailboxes defined in a CSV file.
     It removes any existing permissions that are not defined in the CSV file.
-    Features a GUI file picker for easy CSV file selection.
+    Features a GUI file picker for easy CSV file selection and generates detailed HTML reports.
 .PARAMETER WhatIf
     Shows what would be done without making changes
 .EXAMPLE
